@@ -1,0 +1,1 @@
+/usr/bin/c++  -g   CMakeFiles/rewo-single.dir/main.cpp.o CMakeFiles/rewo-single.dir/api.cpp.o CMakeFiles/rewo-single.dir/exp.cpp.o CMakeFiles/rewo-single.dir/factory.cpp.o CMakeFiles/rewo-single.dir/hash.cpp.o CMakeFiles/rewo-single.dir/storage.cpp.o CMakeFiles/rewo-single.dir/cli.cpp.o  -o rewo-single 
