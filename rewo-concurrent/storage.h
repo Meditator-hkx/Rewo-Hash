@@ -65,7 +65,7 @@ typedef struct {
     struct {
         uint8_t bitmap;
         uint8_t lockmap;
-        uint16_t padding;
+        uint16_t version;
         union {
             uint32_t fingerprints;
             uint32_t lru_sorteds;

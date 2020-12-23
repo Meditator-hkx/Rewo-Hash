@@ -294,22 +294,28 @@ uint32_t rewo_get_kv_num() {
 int pm_search(uint64_t key, char *value) {
     uint32_t bucketOff;
     uint32_t table_index;
+    uint64_t bucket_meta_check;
 
+PM_SEARCH:
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = persistent_hash(key, table_index, h);
         auto *PBucket = (Bucket *)SP->table_addr[table_index];
+        bucket_meta_check = *(uint64_t *)&PBucket[bucketOff].meta;
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bit state = 1
             if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key fingerprint match
                 if (fp_match(&PBucket[bucketOff].meta.fingerprints, i, key)) {
                     if (PBucket[bucketOff].kv[i].key == key) {
+                        // return
+                        strcpy(value, PBucket[bucketOff].kv[i].value);
+                        if (bucket_meta_check != *(uint64_t *)&PBucket[bucketOff].meta) {
+                            goto PM_SEARCH;
+                        }
 #if DRAM_CACHE_ENABLE == 1
                         // cache the kv item
                         cache_insert(key, value);
 #endif
-                        // return
-                        strcpy(value, PBucket[bucketOff].kv[i].value);
                         return 0;
                     }
                 }
@@ -324,22 +330,28 @@ int pm_search(uint64_t key, char *value) {
 int pm_search(char *key, char *value) {
     uint32_t bucketOff;
     uint32_t table_index;
+    uint64_t bucket_meta_check;
 
+PM_SEARCH:
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = persistent_hash(key, table_index, h);
         auto *PBucket = (Bucket *)SP->table_addr[table_index];
+        bucket_meta_check = *(uint64_t *)&PBucket[bucketOff].meta;
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bit state = 1
             if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key fingerprint match
                 if (fp_match(&PBucket[bucketOff].meta.fingerprints, i, key)) {
                     if (strcmp(PBucket[bucketOff].kv[i].ckey, key) == 0) {
+                        // return
+                        strcpy(value, PBucket[bucketOff].kv[i].value);
+                        if (bucket_meta_check != *(uint64_t *)&PBucket[bucketOff].meta) {
+                            goto PM_SEARCH;
+                        }
 #if DRAM_CACHE_ENABLE == 1
                         // cache the kv item
                         cache_insert(key, value);
 #endif
-                        // return
-                        strcpy(value, PBucket[bucketOff].kv[i].value);
                         return 0;
                     }
                 }
@@ -351,6 +363,7 @@ int pm_search(char *key, char *value) {
     return -1;
 }
 
+// NOTICE: insert does not need to update the bucket version since it only appends to a free slot
 int pm_insert(uint64_t key, char *value) {
     uint32_t bucketOff;
     uint32_t table_index;
@@ -382,6 +395,7 @@ int pm_insert(uint64_t key, char *value) {
                 commit(&PBucket[bucketOff].meta.bitmap, i);
                 // 4.3 persist the metadata -> durable transaction
                 flush_with_fence(&PBucket[bucketOff].meta);
+
 
                 // 5. unlock the slot
                 // NOTICE: it can be volatile and will be reset during crash recovery
@@ -475,6 +489,7 @@ int pm_insert(uint64_t key, char *value) {
     return -1;
 }
 
+// NOTICE: insert does not need to update the bucket version since it only appends to a free slot
 int pm_insert(char *key, char *value) {
     uint32_t bucketOff1, bucketOff2, bucketOff;
     uint32_t table_index;
@@ -637,6 +652,9 @@ int pm_update(uint64_t key, char *value) {
                                 commit(&PBucket[bucketOff].meta.bitmap, i, j);
                                 flush_with_fence(&PBucket[bucketOff].meta);
 
+                                // update bucket version
+                                PBucket[bucketOff].meta.version++;
+
                                 // unlock two slots (locks can be volatile)
                                 unlock(&PBucket[bucketOff].meta.lockmap, i, j);
                                 return 0;
@@ -686,6 +704,8 @@ int pm_update(uint64_t key, char *value) {
                         unlock(&PBucket[eBucketOff].meta.lockmap, j);
 
                         // 6. delete the original item in target bucket
+                        // update bucket version
+                        PBucket[bucketOff].meta.version++;
                         invalidate(&PBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&PBucket[bucketOff].meta);
 
@@ -760,6 +780,9 @@ int pm_update(char *key, char *value) {
                                 commit(&PBucket[bucketOff].meta.bitmap, i, j);
                                 flush_with_fence(&PBucket[bucketOff].meta);
 
+                                // update bucket version
+                                PBucket[bucketOff].meta.version++;
+
                                 // unlock two slots (locks can be volatile)
                                 unlock(&PBucket[bucketOff].meta.lockmap, i, j);
                                 return 0;
@@ -809,6 +832,8 @@ int pm_update(char *key, char *value) {
                         unlock(&PBucket[eBucketOff].meta.lockmap, j);
 
                         // 6. delete the original item in target bucket
+                        // update bucket version
+                        PBucket[bucketOff].meta.version++;
                         invalidate(&PBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&PBucket[bucketOff].meta);
 
@@ -865,6 +890,8 @@ int pm_delete(uint64_t key) {
                         if (lock(&PBucket[bucketOff].meta.lockmap, i)) {
                             invalidate(&PBucket[bucketOff].meta.bitmap, i);
                             flush_with_fence(&PBucket[bucketOff].meta);
+                            // update bucket version
+                            PBucket[bucketOff].meta.version++;
                             unlock(&PBucket[bucketOff].meta.lockmap, i);
 
                             // update system metadata
@@ -903,6 +930,8 @@ int pm_delete(char *key) {
                         // can be cancelled for some use
                         if (lock(&PBucket[bucketOff].meta.lockmap, i)) {
                             invalidate(&PBucket[bucketOff].meta.bitmap, i);
+                            // update bucket version
+                            PBucket[bucketOff].meta.version++;
                             flush_with_fence(&PBucket[bucketOff].meta);
                             unlock(&PBucket[bucketOff].meta.lockmap, i);
 
@@ -929,16 +958,24 @@ int pm_delete(char *key) {
  */
 int cache_search(uint64_t key, char *value) {
     uint32_t bucketOff;
+    uint64_t bucket_meta_check;
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
+        bucket_meta_check = *(uint64_t *)&CBucket[bucketOff].meta;
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key match
                 if (CBucket[bucketOff].kv[i].key == key) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-                    return 0;
+                    if (bucket_meta_check == *(uint64_t *)&CBucket[bucketOff].meta) {
+                        return 0;
+                    }
+                    else {
+                        // check from persistent table
+                        return -1;
+                    }
                 }
             }
         }
@@ -949,16 +986,24 @@ int cache_search(uint64_t key, char *value) {
 
 int cache_search(char *key, char *value) {
     uint32_t bucketOff;
+    uint64_t bucket_meta_check;
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
+        bucket_meta_check = *(uint64_t *)&CBucket[bucketOff].meta;
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key match
                 if (strcmp(CBucket[bucketOff].kv[i].ckey, key) == 0) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-                    return 0;
+                    if (bucket_meta_check == *(uint64_t *)&CBucket[bucketOff].meta) {
+                        return 0;
+                    }
+                    else {
+                        // check from persistent table
+                        return -1;
+                    }
                 }
             }
         }
@@ -990,7 +1035,10 @@ int cache_insert(uint64_t key, char *value) {
                     // 5. update the bucket lru information
                     lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
-                    // 6. unlock this slot
+                    // 6. update the bucket version
+                    CBucket[bucketOff].meta.version++;
+
+                    // 7. unlock this slot
                     unlock(&CBucket[bucketOff].meta.lockmap, i);
                     return i;
                 }
@@ -1026,7 +1074,10 @@ int cache_insert(char *key, char *value) {
                     // 5. update the bucket lru information
                     lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
-                    // 6. unlock this slot
+                    // 6. update the bucket version
+                    CBucket[bucketOff].meta.version++;
+
+                    // 7. unlock this slot
                     unlock(&CBucket[bucketOff].meta.lockmap, i);
                     return i;
                 }
@@ -1061,6 +1112,7 @@ int cache_insert(uint64_t key, char *value, uint64_t &lockmap_addr) {
 
                     // 5. update the bucket lru information
                     lru_update(&CBucket[bucketOff].meta.fingerprints, i);
+
 
                     // 6. unlock this slot
                     // NOTICE: may need to wait for the NVM bucket's persistence notification
@@ -1100,6 +1152,7 @@ int cache_insert(char *key, char *value, uint64_t &lockmap_addr) {
                     // 5. update the bucket lru information
                     lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
+
                     // 6. unlock this slot
                     // NOTICE: may need to wait for the NVM bucket's persistence notification
                     // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1120,7 +1173,7 @@ int cache_update(uint64_t key, char *value, uint64_t &lockmap_addr) {
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
-Cache_Update:
+Cache_Update_1:
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
@@ -1134,13 +1187,16 @@ Cache_Update:
                         // update the bucket lru information
                         lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
+                        // update the bucket version
+                        CBucket[bucketOff].meta.version++;
+
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
                         lockmap_addr = (uint64_t)&CBucket[bucketOff].meta.lockmap;
                         return i;
                     }
                     else {
-                        goto Cache_Update;
+                        goto Cache_Update_1;
                     }
                 }
             }
@@ -1157,7 +1213,7 @@ int cache_update(char *key, char *value, uint64_t &lockmap_addr) {
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
-        Cache_Update:
+Cache_Update_2:
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
@@ -1171,13 +1227,16 @@ int cache_update(char *key, char *value, uint64_t &lockmap_addr) {
                         // update the bucket lru information
                         lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
+                        // update the bucket version
+                        CBucket[bucketOff].meta.version++;
+
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
                         lockmap_addr = (uint64_t)&CBucket[bucketOff].meta.lockmap;
                         return i;
                     }
                     else {
-                        goto Cache_Update;
+                        goto Cache_Update_2;
                     }
                 }
             }
@@ -1205,6 +1264,9 @@ int cache_delete(uint64_t key, uint64_t &lockmap_addr) {
                         // delete the item
                         invalidate(&CBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&CBucket[bucketOff].meta);
+
+                        // update the bucket version
+                        CBucket[bucketOff].meta.version++;
 
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1241,6 +1303,9 @@ int cache_delete(char *key, uint64_t &lockmap_addr) {
                         invalidate(&CBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&CBucket[bucketOff].meta);
 
+                        // update the bucket version
+                        CBucket[bucketOff].meta.version++;
+
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
                         lockmap_addr = (uint64_t)&CBucket[bucketOff].meta.lockmap;
@@ -1264,7 +1329,6 @@ void cache_replace(uint64_t key, char *value) {
     if (ret == 0)
         return;
 
-
     uint32_t bucketOff = cache_hash(key, 0);
 
     // choose the least-recently-accessed element to be evicted
@@ -1274,6 +1338,8 @@ void cache_replace(uint64_t key, char *value) {
         strcpy(CBucket[bucketOff].kv[k].value, value);
         // update bucket lru information
         lru_update(&CBucket[bucketOff].meta.lru_sorteds);
+        // update the bucket version
+        CBucket[bucketOff].meta.version++;
         unlock(&CBucket[bucketOff].meta.lockmap, k);
     }
     else {
@@ -1294,6 +1360,8 @@ void cache_replace(char *key, char *value) {
         strcpy(CBucket[bucketOff].kv[k].value, value);
         // update bucket lru information
         lru_update(&CBucket[bucketOff].meta.lru_sorteds);
+        // update the bucket version
+        CBucket[bucketOff].meta.version++;
         unlock(&CBucket[bucketOff].meta.lockmap, k);
     }
     else {
