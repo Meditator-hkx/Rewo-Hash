@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
         std::cout << "test_count: xx times.\n";
         std::cout << "thread_num: xx threads.\n";
 
-        ttype = 0;
+        ttype = 1;
         ntype = 0;
         otype = 0;
         nsize = 100 * 1024 * 1024;
@@ -44,6 +44,13 @@ int main(int argc, char *argv[]) {
 //        return -1;
     }
 
+
+
+    // temporal test
+//    cout << "size of bucket: " << sizeof(Bucket) << endl;
+//    cout << "size of key-value: " << sizeof(KeyValue) << endl;
+//    cout << "size of bucket meta: " << sizeof(meta) << endl;
+//    return 0;
 
     FRONTEND_THREAD_NUM = threads;
     rewo_init(ntype);

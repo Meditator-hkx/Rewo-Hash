@@ -24,8 +24,10 @@
 #define EXPORT_FILE "kaixin_table.txt"
 
 /* if the DRAM cache should be used (it is enabled by default) */
-#define DRAM_CACHE_ENABLE 1
+#define DRAM_CACHE_ENABLE 0
 
+/* read-write concurrency policy type: 0 = bucket version; 1 = slot version */
+#define READ_WRITE_CONCURRENCY_POLICY 1
 
 
 

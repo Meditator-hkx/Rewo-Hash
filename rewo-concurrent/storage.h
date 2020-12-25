@@ -11,16 +11,21 @@
 #define BUCKET_SIZE (128)
 #endif
 
+
 /* key size: smaller than 16B, including 16B */
+#if (READ_WRITE_CONCURRENCY_POLICY == 0)
 #define KEY_SIZE (16)
+#else
+#define KEY_SIZE (14)
+#endif
 /* bucket metadata: 8B, supporting atomic modification */
 #define BUCKET_META_SIZE (8)
 /* bucket data size: 248B by default */
 #define BUCKET_KV_SIZE (BUCKET_SIZE - BUCKET_META_SIZE)
 /* bucket slot number: 8 by default */
-#define SLOT_PER_BUCKET (BUCKET_SIZE / (KEY_SIZE * 2))
+#define SLOT_PER_BUCKET 8
 /* value size: smaller than 15B, including 15B, by default */
-#define VALUE_SIZE (BUCKET_KV_SIZE / SLOT_PER_BUCKET - KEY_SIZE)
+#define VALUE_SIZE 15
 #define KV_SIZE (KEY_SIZE + VALUE_SIZE)
 
 #define BIT_FLAG (1 << (SLOT_PER_BUCKET - 1))
@@ -58,7 +63,20 @@ typedef struct {
         uint64_t val;
         char value[VALUE_SIZE];
     } __attribute__((packed));
+#if READ_WRITE_CONCURRENCY_POLICY == 1
+    uint16_t version;
+#endif
 } __attribute__((packed)) KeyValue;
+
+struct {
+    uint8_t bitmap;
+    uint8_t lockmap;
+    uint16_t version;
+    union {
+        uint32_t fingerprints;
+        uint32_t lru_sorteds;
+    };
+} __attribute__((packed)) meta;
 
 typedef struct {
     // 8-byte bucket metadata

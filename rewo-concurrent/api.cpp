@@ -294,24 +294,38 @@ uint32_t rewo_get_kv_num() {
 int pm_search(uint64_t key, char *value) {
     uint32_t bucketOff;
     uint32_t table_index;
-    uint64_t bucket_meta_check;
+    uint16_t bucket_version_check;
+    uint16_t slot_version_check;
+
 
 PM_SEARCH:
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = persistent_hash(key, table_index, h);
         auto *PBucket = (Bucket *)SP->table_addr[table_index];
-        bucket_meta_check = *(uint64_t *)&PBucket[bucketOff].meta;
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        bucket_version_check = PBucket[bucketOff].meta.version;
+#endif
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bit state = 1
             if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key fingerprint match
                 if (fp_match(&PBucket[bucketOff].meta.fingerprints, i, key)) {
+#if READ_WRITE_CONCURRENCY_POLICY==1
+                    slot_version_check = PBucket[bucketOff].kv[i].version;
+#endif
                     if (PBucket[bucketOff].kv[i].key == key) {
                         // return
                         strcpy(value, PBucket[bucketOff].kv[i].value);
-                        if (bucket_meta_check != *(uint64_t *)&PBucket[bucketOff].meta) {
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        if (bucket_version_check != PBucket[bucketOff].meta.version) {
                             goto PM_SEARCH;
                         }
+#else
+                        if (slot_version_check != PBucket[bucketOff].kv[i].version) {
+                            goto PM_SEARCH;
+                        }
+#endif
+
 #if DRAM_CACHE_ENABLE == 1
                         // cache the kv item
                         cache_insert(key, value);
@@ -330,24 +344,37 @@ PM_SEARCH:
 int pm_search(char *key, char *value) {
     uint32_t bucketOff;
     uint32_t table_index;
-    uint64_t bucket_meta_check;
+    uint16_t bucket_version_check;
+    uint16_t slot_version_check;
 
 PM_SEARCH:
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = persistent_hash(key, table_index, h);
         auto *PBucket = (Bucket *)SP->table_addr[table_index];
-        bucket_meta_check = *(uint64_t *)&PBucket[bucketOff].meta;
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        bucket_version_check = PBucket[bucketOff].meta.version;
+#endif
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bit state = 1
             if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key fingerprint match
                 if (fp_match(&PBucket[bucketOff].meta.fingerprints, i, key)) {
+#if READ_WRITE_CONCURRENCY_POLICY==1
+                    slot_version_check = PBucket[bucketOff].kv[i].version;
+#endif
                     if (strcmp(PBucket[bucketOff].kv[i].ckey, key) == 0) {
                         // return
                         strcpy(value, PBucket[bucketOff].kv[i].value);
-                        if (bucket_meta_check != *(uint64_t *)&PBucket[bucketOff].meta) {
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        if (bucket_version_check != PBucket[bucketOff].meta.version) {
                             goto PM_SEARCH;
                         }
+#else
+                        if (slot_version_check != PBucket[bucketOff].kv[i].version) {
+                            goto PM_SEARCH;
+                        }
+#endif
+
 #if DRAM_CACHE_ENABLE == 1
                         // cache the kv item
                         cache_insert(key, value);
@@ -651,9 +678,13 @@ int pm_update(uint64_t key, char *value) {
                                 fp_append(&PBucket[bucketOff].meta.fingerprints, j, key);
                                 commit(&PBucket[bucketOff].meta.bitmap, i, j);
                                 flush_with_fence(&PBucket[bucketOff].meta);
-
+#if READ_WRITE_CONCURRENCY_POLICY==0
                                 // update bucket version
                                 PBucket[bucketOff].meta.version++;
+#else
+                                // update slot version
+                                PBucket[bucketOff].kv[i].version++;
+#endif
 
                                 // unlock two slots (locks can be volatile)
                                 unlock(&PBucket[bucketOff].meta.lockmap, i, j);
@@ -704,8 +735,13 @@ int pm_update(uint64_t key, char *value) {
                         unlock(&PBucket[eBucketOff].meta.lockmap, j);
 
                         // 6. delete the original item in target bucket
+#if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         PBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        PBucket[bucketOff].kv[i].version++;
+#endif
                         invalidate(&PBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&PBucket[bucketOff].meta);
 
@@ -780,8 +816,13 @@ int pm_update(char *key, char *value) {
                                 commit(&PBucket[bucketOff].meta.bitmap, i, j);
                                 flush_with_fence(&PBucket[bucketOff].meta);
 
+#if READ_WRITE_CONCURRENCY_POLICY==0
                                 // update bucket version
                                 PBucket[bucketOff].meta.version++;
+#else
+                                // update slot version
+                                PBucket[bucketOff].kv[i].version++;
+#endif
 
                                 // unlock two slots (locks can be volatile)
                                 unlock(&PBucket[bucketOff].meta.lockmap, i, j);
@@ -832,8 +873,13 @@ int pm_update(char *key, char *value) {
                         unlock(&PBucket[eBucketOff].meta.lockmap, j);
 
                         // 6. delete the original item in target bucket
+#if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         PBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        PBucket[bucketOff].kv[i].version++;
+#endif
                         invalidate(&PBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&PBucket[bucketOff].meta);
 
@@ -890,8 +936,13 @@ int pm_delete(uint64_t key) {
                         if (lock(&PBucket[bucketOff].meta.lockmap, i)) {
                             invalidate(&PBucket[bucketOff].meta.bitmap, i);
                             flush_with_fence(&PBucket[bucketOff].meta);
+#if READ_WRITE_CONCURRENCY_POLICY==0
                             // update bucket version
                             PBucket[bucketOff].meta.version++;
+#else
+                            // update slot version
+                            PBucket[bucketOff].kv[i].version++;
+#endif
                             unlock(&PBucket[bucketOff].meta.lockmap, i);
 
                             // update system metadata
@@ -930,8 +981,13 @@ int pm_delete(char *key) {
                         // can be cancelled for some use
                         if (lock(&PBucket[bucketOff].meta.lockmap, i)) {
                             invalidate(&PBucket[bucketOff].meta.bitmap, i);
+#if READ_WRITE_CONCURRENCY_POLICY==0
                             // update bucket version
                             PBucket[bucketOff].meta.version++;
+#else
+                            // update slot version
+                            PBucket[bucketOff].kv[i].version++;
+#endif
                             flush_with_fence(&PBucket[bucketOff].meta);
                             unlock(&PBucket[bucketOff].meta.lockmap, i);
 
@@ -958,20 +1014,32 @@ int pm_delete(char *key) {
  */
 int cache_search(uint64_t key, char *value) {
     uint32_t bucketOff;
-    uint64_t bucket_meta_check;
+    uint16_t bucket_version_check;
+    uint16_t slot_version_check;
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
-        bucket_meta_check = *(uint64_t *)&CBucket[bucketOff].meta;
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        bucket_version_check = CBucket[bucketOff].meta.version;
+#endif
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
+#if READ_WRITE_CONCURRENCY_POLICY==1
+                slot_version_check = CBucket[bucketOff].kv[i].version;
+#endif
                 // key match
                 if (CBucket[bucketOff].kv[i].key == key) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-                    if (bucket_meta_check == *(uint64_t *)&CBucket[bucketOff].meta) {
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                    if (bucket_version_check == CBucket[bucketOff].meta.version) {
                         return 0;
                     }
+#else
+                    if (slot_version_check == CBucket[bucketOff].kv[i].version) {
+                        return 0;
+                    }
+#endif
                     else {
                         // check from persistent table
                         return -1;
@@ -986,20 +1054,32 @@ int cache_search(uint64_t key, char *value) {
 
 int cache_search(char *key, char *value) {
     uint32_t bucketOff;
-    uint64_t bucket_meta_check;
+    uint16_t bucket_version_check;
+    uint16_t slot_version_check;
 
     for (int h = 0;h < HASH_NUM;h++) {
         bucketOff = cache_hash(key, h);
-        bucket_meta_check = *(uint64_t *)&CBucket[bucketOff].meta;
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        bucket_version_check = CBucket[bucketOff].meta.version;
+#endif
         for (int i = 0;i < SLOT_PER_BUCKET;i++) {
             // bitmap state = 1
             if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
                 // key match
+#if READ_WRITE_CONCURRENCY_POLICY==1
+                slot_version_check = CBucket[bucketOff].kv[i].version;
+#endif
                 if (strcmp(CBucket[bucketOff].kv[i].ckey, key) == 0) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-                    if (bucket_meta_check == *(uint64_t *)&CBucket[bucketOff].meta) {
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                    if (bucket_version_check == CBucket[bucketOff].meta.version) {
                         return 0;
                     }
+#else
+                    if (slot_version_check == CBucket[bucketOff].kv[i].version) {
+                        return 0;
+                    }
+#endif
                     else {
                         // check from persistent table
                         return -1;
@@ -1187,8 +1267,13 @@ Cache_Update_1:
                         // update the bucket lru information
                         lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
-                        // update the bucket version
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        // update bucket version
                         CBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        CBucket[bucketOff].kv[i].version++;
+#endif
 
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1227,8 +1312,13 @@ Cache_Update_2:
                         // update the bucket lru information
                         lru_update(&CBucket[bucketOff].meta.fingerprints, i);
 
-                        // update the bucket version
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        // update bucket version
                         CBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        CBucket[bucketOff].kv[i].version++;
+#endif
 
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1265,8 +1355,13 @@ int cache_delete(uint64_t key, uint64_t &lockmap_addr) {
                         invalidate(&CBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&CBucket[bucketOff].meta);
 
-                        // update the bucket version
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        // update bucket version
                         CBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        CBucket[bucketOff].kv[i].version++;
+#endif
 
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1303,8 +1398,13 @@ int cache_delete(char *key, uint64_t &lockmap_addr) {
                         invalidate(&CBucket[bucketOff].meta.bitmap, i);
                         flush_with_fence(&CBucket[bucketOff].meta);
 
-                        // update the bucket version
+#if READ_WRITE_CONCURRENCY_POLICY==0
+                        // update bucket version
                         CBucket[bucketOff].meta.version++;
+#else
+                        // update slot version
+                        CBucket[bucketOff].kv[i].version++;
+#endif
 
                         // unlock current slot
                         // unlock(&CBucket[bucketOff].meta.lockmap, i);
@@ -1338,8 +1438,13 @@ void cache_replace(uint64_t key, char *value) {
         strcpy(CBucket[bucketOff].kv[k].value, value);
         // update bucket lru information
         lru_update(&CBucket[bucketOff].meta.lru_sorteds);
-        // update the bucket version
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        // update bucket version
         CBucket[bucketOff].meta.version++;
+#else
+        // update slot version
+        CBucket[bucketOff].kv[k].version++;
+#endif
         unlock(&CBucket[bucketOff].meta.lockmap, k);
     }
     else {
@@ -1360,8 +1465,13 @@ void cache_replace(char *key, char *value) {
         strcpy(CBucket[bucketOff].kv[k].value, value);
         // update bucket lru information
         lru_update(&CBucket[bucketOff].meta.lru_sorteds);
-        // update the bucket version
-        CBucket[bucketOff].meta.version++;
+#if READ_WRITE_CONCURRENCY_POLICY==0
+        // update bucket version
+                        CBucket[bucketOff].meta.version++;
+#else
+        // update slot version
+        CBucket[bucketOff].kv[k].version++;
+#endif
         unlock(&CBucket[bucketOff].meta.lockmap, k);
     }
     else {

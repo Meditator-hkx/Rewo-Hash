@@ -55,8 +55,8 @@ void buffer_init() {
 }
 
 void ht_exit() {
-    munmap(nvm_base_addr, PKV_SIZE);
     memcpy(SP, SP_DRAM, SUPER_SIZE);
+    munmap(nvm_base_addr, PKV_SIZE);
     flush_with_fence(SP);
     SP->magic = MAGIC;
     flush_with_fence(&SP->magic);
