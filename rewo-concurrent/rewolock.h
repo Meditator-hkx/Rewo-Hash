@@ -1,6 +1,7 @@
 #pragma once
 
 #include "storage.h"
+#include <immintrin.h>
 
 #define cmpxchg(P, O, N) __sync_val_compare_and_swap((P), (O), (N))
 

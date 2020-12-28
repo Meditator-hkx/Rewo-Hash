@@ -53,13 +53,13 @@ int main(int argc, char *argv[]) {
 //    return 0;
 
     FRONTEND_THREAD_NUM = threads;
-    rewo_init(ntype);
 
     if (ttype == 0) {
+        rewo_init(ntype);
         show_cli();
     }
-
     else if (ttype == 1) {
+        rewo_init(ntype);
         int ret;
         int key1 = 1;
         char *value1 = (char *)"value1";

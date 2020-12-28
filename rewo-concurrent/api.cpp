@@ -136,13 +136,37 @@ void rewo_resize() {
 
 int rewo_search(int order, uint64_t key, char *value) {
     int ret;
+    uint32_t tx_stat;
 #if DRAM_CACHE_ENABLE == 1
-    ret = cache_search(key, value);
+#if READ_WRITE_CONCURRENCY_POLICY==2
+    tx_stat = _xbegin();
+    if (tx_stat == _XBEGIN_STARTED) {
+#endif
+        ret = cache_search(key, value);
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+        _xend();
+    }
+    else {
+        ret = -1;
+    }
+#endif
     if (ret == 0) {
         return 0;
     }
 #endif
+
+#if READ_WRITE_CONCURRENCY_POLICY==2
+    tx_stat = _xbegin();
+    if (tx_stat == _XBEGIN_STARTED) {
+#endif
     ret = pm_search(key, value);
+#if READ_WRITE_CONCURRENCY_POLICY==2
+        _xend();
+    }
+    else {
+        ret = pm_search(key, value);
+    }
+#endif
     // add (key,value) to cache
     // cache_add(key, value);
     // cache replace might be required -> lru_replace(key, value);
@@ -157,13 +181,37 @@ int rewo_search(int order, uint64_t key, char *value) {
 
 int rewo_search(int order, char *key, char *value) {
     int ret;
+    uint32_t tx_stat;
 #if DRAM_CACHE_ENABLE == 1
+#if READ_WRITE_CONCURRENCY_POLICY==2
+    tx_stat = _xbegin();
+    if (tx_stat == _XBEGIN_STARTED) {
+#endif
     ret = cache_search(key, value);
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+        _xend();
+    }
+    else {
+        ret = -1;
+    }
+#endif
     if (ret == 0) {
         return 0;
     }
 #endif
+
+#if READ_WRITE_CONCURRENCY_POLICY==2
+    tx_stat = _xbegin();
+    if (tx_stat == _XBEGIN_STARTED) {
+#endif
     ret = pm_search(key, value);
+#if READ_WRITE_CONCURRENCY_POLICY==2
+        _xend();
+    }
+    else {
+        ret = pm_search(key, value);
+    }
+#endif
     // add (key,value) to cache
     // cache_add(key, value);
     // cache replace might be required -> lru_replace(key, value);
@@ -320,7 +368,7 @@ PM_SEARCH:
                         if (bucket_version_check != PBucket[bucketOff].meta.version) {
                             goto PM_SEARCH;
                         }
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         if (slot_version_check != PBucket[bucketOff].kv[i].version) {
                             goto PM_SEARCH;
                         }
@@ -369,7 +417,7 @@ PM_SEARCH:
                         if (bucket_version_check != PBucket[bucketOff].meta.version) {
                             goto PM_SEARCH;
                         }
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         if (slot_version_check != PBucket[bucketOff].kv[i].version) {
                             goto PM_SEARCH;
                         }
@@ -681,7 +729,7 @@ int pm_update(uint64_t key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                                 // update bucket version
                                 PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                                 // update slot version
                                 PBucket[bucketOff].kv[i].version++;
 #endif
@@ -738,7 +786,7 @@ int pm_update(uint64_t key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         PBucket[bucketOff].kv[i].version++;
 #endif
@@ -819,7 +867,7 @@ int pm_update(char *key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                                 // update bucket version
                                 PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                                 // update slot version
                                 PBucket[bucketOff].kv[i].version++;
 #endif
@@ -876,7 +924,7 @@ int pm_update(char *key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         PBucket[bucketOff].kv[i].version++;
 #endif
@@ -939,7 +987,7 @@ int pm_delete(uint64_t key) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                             // update bucket version
                             PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                             // update slot version
                             PBucket[bucketOff].kv[i].version++;
 #endif
@@ -984,7 +1032,7 @@ int pm_delete(char *key) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                             // update bucket version
                             PBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                             // update slot version
                             PBucket[bucketOff].kv[i].version++;
 #endif
@@ -1031,19 +1079,19 @@ int cache_search(uint64_t key, char *value) {
                 // key match
                 if (CBucket[bucketOff].kv[i].key == key) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-#if READ_WRITE_CONCURRENCY_POLICY==0
+#if READ_WRITE_CONCURRENCY_POLICY == 0
                     if (bucket_version_check == CBucket[bucketOff].meta.version) {
                         return 0;
                     }
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY == 1
                     if (slot_version_check == CBucket[bucketOff].kv[i].version) {
                         return 0;
                     }
 #endif
-                    else {
-                        // check from persistent table
-                        return -1;
-                    }
+                }
+                else {
+                    // check from persistent table
+                    return -1;
                 }
             }
         }
@@ -1071,19 +1119,19 @@ int cache_search(char *key, char *value) {
 #endif
                 if (strcmp(CBucket[bucketOff].kv[i].ckey, key) == 0) {
                     strcpy(value, CBucket[bucketOff].kv[i].value);
-#if READ_WRITE_CONCURRENCY_POLICY==0
+#if READ_WRITE_CONCURRENCY_POLICY == 0
                     if (bucket_version_check == CBucket[bucketOff].meta.version) {
                         return 0;
                     }
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY == 1
                     if (slot_version_check == CBucket[bucketOff].kv[i].version) {
                         return 0;
                     }
 #endif
-                    else {
-                        // check from persistent table
-                        return -1;
-                    }
+                }
+                else {
+                    // check from persistent table
+                    return -1;
                 }
             }
         }
@@ -1270,7 +1318,7 @@ Cache_Update_1:
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         CBucket[bucketOff].kv[i].version++;
 #endif
@@ -1315,7 +1363,7 @@ Cache_Update_2:
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         CBucket[bucketOff].kv[i].version++;
 #endif
@@ -1358,7 +1406,7 @@ int cache_delete(uint64_t key, uint64_t &lockmap_addr) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         CBucket[bucketOff].kv[i].version++;
 #endif
@@ -1401,7 +1449,7 @@ int cache_delete(char *key, uint64_t &lockmap_addr) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         // update bucket version
                         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
                         // update slot version
                         CBucket[bucketOff].kv[i].version++;
 #endif
@@ -1441,7 +1489,7 @@ void cache_replace(uint64_t key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
         // update bucket version
         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
         // update slot version
         CBucket[bucketOff].kv[k].version++;
 #endif
@@ -1468,7 +1516,7 @@ void cache_replace(char *key, char *value) {
 #if READ_WRITE_CONCURRENCY_POLICY==0
         // update bucket version
                         CBucket[bucketOff].meta.version++;
-#else
+#elif READ_WRITE_CONCURRENCY_POLICY==1
         // update slot version
         CBucket[bucketOff].kv[k].version++;
 #endif
