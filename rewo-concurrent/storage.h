@@ -13,10 +13,10 @@
 
 
 /* key size: smaller than 16B, including 16B */
-#if (READ_WRITE_CONCURRENCY_POLICY == 0)
-#define KEY_SIZE (16)
-#else
+#if (READ_WRITE_CONCURRENCY_POLICY == 1)
 #define KEY_SIZE (14)
+#else
+#define KEY_SIZE (16)
 #endif
 /* bucket metadata: 8B, supporting atomic modification */
 #define BUCKET_META_SIZE (8)
