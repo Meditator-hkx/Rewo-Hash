@@ -56,10 +56,10 @@ void buffer_init() {
 
 void ht_exit() {
     memcpy(SP, SP_DRAM, SUPER_SIZE);
-    munmap(nvm_base_addr, PKV_SIZE);
     flush_with_fence(SP);
     SP->magic = MAGIC;
     flush_with_fence(&SP->magic);
+    munmap(nvm_base_addr, PKV_SIZE);
 #if DRAM_CACHE_ENABLE == 1
     free(dram_base_addr);
     free(TupleSet);
