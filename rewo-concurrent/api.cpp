@@ -136,37 +136,14 @@ void rewo_resize() {
 
 int rewo_search(int order, uint64_t key, char *value) {
     int ret;
-    uint32_t tx_stat;
 #if DRAM_CACHE_ENABLE == 1
-#if READ_WRITE_CONCURRENCY_POLICY==2
-    tx_stat = _xbegin();
-    if (tx_stat == _XBEGIN_STARTED) {
-#endif
-        ret = cache_search(key, value);
-#if READ_WRITE_CONCURRENCY_POLICY == 2
-        _xend();
-    }
-    else {
-        ret = -1;
-    }
-#endif
+    ret = cache_search(key, value);
     if (ret == 0) {
         return 0;
     }
 #endif
 
-#if READ_WRITE_CONCURRENCY_POLICY==2
-    tx_stat = _xbegin();
-    if (tx_stat == _XBEGIN_STARTED) {
-#endif
     ret = pm_search(key, value);
-#if READ_WRITE_CONCURRENCY_POLICY==2
-        _xend();
-    }
-    else {
-        ret = pm_search(key, value);
-    }
-#endif
     // add (key,value) to cache
     // cache_add(key, value);
     // cache replace might be required -> lru_replace(key, value);
@@ -181,37 +158,14 @@ int rewo_search(int order, uint64_t key, char *value) {
 
 int rewo_search(int order, char *key, char *value) {
     int ret;
-    uint32_t tx_stat;
 #if DRAM_CACHE_ENABLE == 1
-#if READ_WRITE_CONCURRENCY_POLICY==2
-    tx_stat = _xbegin();
-    if (tx_stat == _XBEGIN_STARTED) {
-#endif
     ret = cache_search(key, value);
-#if READ_WRITE_CONCURRENCY_POLICY == 2
-        _xend();
-    }
-    else {
-        ret = -1;
-    }
-#endif
     if (ret == 0) {
         return 0;
     }
 #endif
 
-#if READ_WRITE_CONCURRENCY_POLICY==2
-    tx_stat = _xbegin();
-    if (tx_stat == _XBEGIN_STARTED) {
-#endif
     ret = pm_search(key, value);
-#if READ_WRITE_CONCURRENCY_POLICY==2
-        _xend();
-    }
-    else {
-        ret = pm_search(key, value);
-    }
-#endif
     // add (key,value) to cache
     // cache_add(key, value);
     // cache replace might be required -> lru_replace(key, value);
@@ -362,7 +316,25 @@ PM_SEARCH:
                     slot_version_check = PBucket[bucketOff].kv[i].version;
 #endif
                     if (PBucket[bucketOff].kv[i].key == key) {
-                        // return
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+                        bool find_flag = false;
+                        uint32_t tx_state = _xbegin();
+                        if (tx_state == _XBEGIN_STARTED) {
+                            if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
+                                if (PBucket[bucketOff].kv[i].key == key) {
+                                    strcpy(value, PBucket[bucketOff].kv[i].value);
+                                    find_flag = true;
+                                }
+                            }
+                        }
+                        _xend();
+                        if (find_flag) {
+                            return 0;
+                        }
+                        else {
+                            goto PM_SEARCH;
+                        }
+#endif
                         strcpy(value, PBucket[bucketOff].kv[i].value);
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         if (bucket_version_check != PBucket[bucketOff].meta.version) {
@@ -411,7 +383,25 @@ PM_SEARCH:
                     slot_version_check = PBucket[bucketOff].kv[i].version;
 #endif
                     if (strcmp(PBucket[bucketOff].kv[i].ckey, key) == 0) {
-                        // return
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+                        bool find_flag = false;
+                        uint32_t tx_state = _xbegin();
+                        if (tx_state == _XBEGIN_STARTED) {
+                            if (PBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
+                                if (strcmp(PBucket[bucketOff].kv[i].ckey, key) == 0) {
+                                    strcpy(value, PBucket[bucketOff].kv[i].value);
+                                    find_flag = true;
+                                }
+                            }
+                        }
+                        _xend();
+                        if (find_flag) {
+                            return 0;
+                        }
+                        else {
+                            goto PM_SEARCH;
+                        }
+#endif
                         strcpy(value, PBucket[bucketOff].kv[i].value);
 #if READ_WRITE_CONCURRENCY_POLICY==0
                         if (bucket_version_check != PBucket[bucketOff].meta.version) {
@@ -1078,6 +1068,25 @@ int cache_search(uint64_t key, char *value) {
 #endif
                 // key match
                 if (CBucket[bucketOff].kv[i].key == key) {
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+                    bool find_flag = false;
+                    uint32_t tx_state = _xbegin();
+                    if (tx_state == _XBEGIN_STARTED) {
+                        if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
+                            if (CBucket[bucketOff].kv[i].key == key) {
+                                strcpy(value, CBucket[bucketOff].kv[i].value);
+                                find_flag = true;
+                            }
+                        }
+                    }
+                    _xend();
+                    if (find_flag) {
+                        return 0;
+                    }
+                    else {
+                        return -1;
+                    }
+#endif
                     strcpy(value, CBucket[bucketOff].kv[i].value);
 #if READ_WRITE_CONCURRENCY_POLICY == 0
                     if (bucket_version_check == CBucket[bucketOff].meta.version) {
@@ -1090,7 +1099,7 @@ int cache_search(uint64_t key, char *value) {
 #endif
                 }
                 else {
-                    // check from persistent table
+                    // need to check from persistent table
                     return -1;
                 }
             }
@@ -1118,6 +1127,25 @@ int cache_search(char *key, char *value) {
                 slot_version_check = CBucket[bucketOff].kv[i].version;
 #endif
                 if (strcmp(CBucket[bucketOff].kv[i].ckey, key) == 0) {
+#if READ_WRITE_CONCURRENCY_POLICY == 2
+                    bool find_flag = false;
+                    uint32_t tx_state = _xbegin();
+                    if (tx_state == _XBEGIN_STARTED) {
+                        if (CBucket[bucketOff].meta.bitmap & (BIT_FLAG >> i)) {
+                            if (strcmp(CBucket[bucketOff].kv[i].ckey, key) == 0) {
+                                strcpy(value, CBucket[bucketOff].kv[i].value);
+                                find_flag = true;
+                            }
+                        }
+                    }
+                    _xend();
+                    if (find_flag) {
+                        return 0;
+                    }
+                    else {
+                        return -1;
+                    }
+#endif
                     strcpy(value, CBucket[bucketOff].kv[i].value);
 #if READ_WRITE_CONCURRENCY_POLICY == 0
                     if (bucket_version_check == CBucket[bucketOff].meta.version) {
